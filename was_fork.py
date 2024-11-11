@@ -184,7 +184,7 @@ class Molde_Load_Image_Batch:
     RETURN_NAMES = ("image", "filename_text")
     FUNCTION = "load_batch_images"
 
-    CATEGORY = "WAS Suite/IO"
+    CATEGORY = "Molde Utils"
 
     def load_batch_images(
         self,
@@ -295,7 +295,7 @@ class Molde_Load_Image_Batch:
         if kwargs["mode"] != "single_image":
             return float("NaN")
         else:
-            fl = WAS_Load_Image_Batch.BatchImageLoader(
+            fl = Molde_Load_Image_Batch.BatchImageLoader(
                 kwargs["path"], kwargs["label"], kwargs["pattern"]
             )
             filename = fl.get_current_image()

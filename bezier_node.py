@@ -30,7 +30,7 @@ class BezierMapping:
     RETURN_TYPES = ("FLOAT", "IMAGE")
     RETURN_NAMES = ("Mapped y-Value", "Bezier Curve Image")
     FUNCTION = "compute"
-    CATEGORY = "Bezier Utilities"
+    CATEGORY = "Molde Utilities"
 
     def compute(self, t_value, P0, P1, P2, P3, output_min, output_max):
         def bezier(t, P0, P1, P2, P3):
