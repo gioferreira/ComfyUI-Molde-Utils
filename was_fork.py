@@ -124,7 +124,7 @@ class Molde_Text_Concatenate:
         }
 
     RETURN_TYPES = ("STRING",)
-    FUNCTION = "tet_concatenate"
+    FUNCTION = "text_concatenate"
 
     CATEGORY = "Molde Utilities"
 
