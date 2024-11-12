@@ -202,7 +202,7 @@ class Molde_Load_Image_Batch:
         if not os.path.exists(path):
             return (None,)
         fl = self.BatchImageLoader(path, label, pattern)
-        # new_paths = fl.image_paths
+
         if mode == "single_image":
             image, filename = fl.get_image_by_id(index)
             if image is None:
@@ -225,9 +225,6 @@ class Molde_Load_Image_Batch:
                 ).error.print()
                 return (None, None)
 
-        # Update history
-        # update_history_images(new_paths)
-
         if not allow_RGBA_output:
             image = image.convert("RGB")
 
@@ -238,20 +235,11 @@ class Molde_Load_Image_Batch:
 
     class BatchImageLoader:
         def __init__(self, directory_path, label, pattern):
-            # self.WDB = WDB
             self.image_paths = []
+            self.index = 0  # Always start from beginning without persistence
+            self.label = label
             self.load_images(directory_path, pattern)
             self.image_paths.sort()
-            stored_directory_path = self.WDB.get("Batch Paths", label)
-            stored_pattern = self.WDB.get("Batch Patterns", label)
-            if stored_directory_path != directory_path or stored_pattern != pattern:
-                self.index = 0
-                self.WDB.insert("Batch Counters", label, 0)
-                self.WDB.insert("Batch Paths", label, directory_path)
-                self.WDB.insert("Batch Patterns", label, pattern)
-            else:
-                self.index = self.WDB.get("Batch Counters", label)
-            self.label = label
 
         def load_images(self, directory_path, pattern):
             for file_name in glob.glob(
@@ -279,7 +267,6 @@ class Molde_Load_Image_Batch:
             cstr(
                 f"{cstr.color.YELLOW}{self.label}{cstr.color.END} Index: {self.index}"
             ).msg.print()
-            self.WDB.insert("Batch Counters", self.label, self.index)
             i = Image.open(image_path)
             i = ImageOps.exif_transpose(i)
             return (i, os.path.basename(image_path))
