@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import base64
 import tempfile
 import numpy as np
 from PIL import Image
@@ -27,16 +28,18 @@ class SaveImageS3API:
                 ),
             },
             "optional": {
+                # Now accepts any string content
                 "custom_metadata": (
                     "STRING",
                     {
                         "default": "",
                         "multiline": True,
-                        "placeholder": "Custom metadata as JSON string",
+                        "placeholder": "Custom metadata string or base64 content",
                     },
                 ),
+                # Switch to specify if the content is base64
+                "metadata_is_base64": (["yes", "no"], {"default": "no"}),
             },
-            # These hidden inputs receive workflow metadata from ComfyUI
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
@@ -47,6 +50,27 @@ class SaveImageS3API:
     OUTPUT_IS_LIST = (True,)
     CATEGORY = "image/output"
 
+    def process_metadata(self, custom_metadata, is_base64):
+        """
+        Process metadata string, handling both regular strings and base64 content.
+        Returns tuple of (processed_content, is_binary)
+        """
+        if not custom_metadata:
+            return None, False
+
+        if is_base64 == "yes":
+            try:
+                # Try to decode base64 content
+                decoded = base64.b64decode(custom_metadata)
+                return decoded, True
+            except Exception as e:
+                logger.warning(
+                    f"Failed to decode base64 metadata, treating as string: {e}"
+                )
+                return custom_metadata, False
+
+        return custom_metadata, False
+
     def save_images(
         self,
         images,
@@ -55,63 +79,56 @@ class SaveImageS3API:
         compression=4,
         include_workflow_metadata="enabled",
         custom_metadata="",
+        metadata_is_base64="no",
         prompt=None,
         extra_pnginfo=None,
     ):
         """
-        Save images to S3 with metadata support
-
-        Args:
-            images: Image tensors to save
-            bucket: S3 bucket name
-            prefix: Path prefix in bucket
-            compression: PNG compression level (0-9)
-            include_workflow_metadata: Whether to include ComfyUI's workflow metadata
-            custom_metadata: Optional custom metadata as JSON string
-            prompt: Workflow prompt info (from ComfyUI)
-            extra_pnginfo: Extra workflow info (from ComfyUI)
+        Save images to S3 with flexible metadata support
         """
         try:
             s3_client = get_s3_client()
             s3_uris = []
             results = []
 
-            # Prepare metadata
-            metadata = None
-            if include_workflow_metadata == "enabled" or custom_metadata:
-                metadata = PngInfo()
+            # Process metadata based on type
+            metadata = PngInfo()
 
-                # Add workflow metadata if enabled
-                if include_workflow_metadata == "enabled":
-                    if prompt is not None:
-                        metadata.add_text("prompt", json.dumps(prompt))
-                    if extra_pnginfo is not None:
-                        for x in extra_pnginfo:
-                            metadata.add_text(x, json.dumps(extra_pnginfo[x]))
+            # Add workflow metadata if enabled
+            if include_workflow_metadata == "enabled":
+                if prompt is not None:
+                    metadata.add_text("prompt", json.dumps(prompt))
+                if extra_pnginfo is not None:
+                    for x in extra_pnginfo:
+                        metadata.add_text(x, json.dumps(extra_pnginfo[x]))
 
-                # Add custom metadata if provided
-                if custom_metadata:
-                    try:
-                        # Validate custom metadata is proper JSON
-                        custom_data = json.loads(custom_metadata)
-                        metadata.add_text("custom_metadata", json.dumps(custom_data))
-                    except json.JSONDecodeError as e:
-                        logger.warning(
-                            f"Invalid JSON in custom_metadata, skipping: {e}"
+            # Add custom metadata if provided
+            if custom_metadata:
+                processed_metadata, is_binary = self.process_metadata(
+                    custom_metadata, metadata_is_base64
+                )
+                if processed_metadata is not None:
+                    if is_binary:
+                        # For binary data (like decoded base64), store as binary
+                        metadata.add_text("custom_metadata_binary", "true")
+                        metadata.add_text(
+                            "custom_metadata", processed_metadata.decode("latin-1")
                         )
+                    else:
+                        # For regular strings, store directly
+                        metadata.add_text("custom_metadata_binary", "false")
+                        metadata.add_text("custom_metadata", processed_metadata)
 
             for image in images:
                 # Convert the image tensor to a PIL Image
                 i = 255.0 * image.cpu().numpy()
                 img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
 
-                # Generate a unique filename using UUID
+                # Generate a unique filename
                 filename = f"{uuid.uuid4()}.png"
-
-                # Create the full S3 key (prefix + filename)
                 s3_key = os.path.join(prefix, filename) if prefix else filename
 
-                # Save the image to a temporary file first
+                # Save to temporary file
                 with tempfile.NamedTemporaryFile(
                     delete=False, suffix=".png"
                 ) as temp_file:
@@ -124,11 +141,11 @@ class SaveImageS3API:
                         # Upload to S3
                         s3_client.upload_file(temp_file.name, bucket, s3_key)
 
-                        # Generate and store the S3 URI
+                        # Generate S3 URI
                         s3_uri = f"s3://{bucket}/{s3_key}"
                         s3_uris.append(s3_uri)
 
-                        # Add to results for UI
+                        # Add to results
                         results.append(
                             {
                                 "filename": filename,
@@ -139,13 +156,10 @@ class SaveImageS3API:
                         )
 
                     finally:
-                        # Clean up the temporary file
+                        # Cleanup
                         if os.path.exists(temp_file.name):
                             os.unlink(temp_file.name)
 
-            # Return both UI info and the S3 URIs
-            # The UI info will be used by ComfyUI
-            # The s3_uris will be available in the API response
             return {"ui": {"images": results}, "result": (s3_uris,)}
 
         except Exception as e:
