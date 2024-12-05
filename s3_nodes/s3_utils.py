@@ -1,127 +1,76 @@
 import os
-import uuid
 import boto3
-from urllib.parse import urlparse
 from .logger import logger
-
-
-def parse_s3_uri(uri):
-    """
-    Parse an S3 URI into bucket name and key.
-
-    Args:
-        uri (str): S3 URI in the format s3://bucket/path/to/file
-
-    Returns:
-        tuple: (bucket_name, key)
-
-    Raises:
-        ValueError: If URI format is invalid
-    """
-    if not uri.startswith("s3://"):
-        raise ValueError("URI must start with 's3://'")
-
-    parsed = urlparse(uri)
-    bucket = parsed.netloc
-    key = parsed.path.lstrip("/")
-
-    if not bucket:
-        raise ValueError("No bucket specified in URI")
-
-    return bucket, key
 
 
 def get_s3_client():
     """
     Create an S3 client using environment variables.
+    This function provides the core S3 client that our nodes need.
 
     Required environment variables:
-    - S3_REGION
-    - S3_ACCESS_KEY
-    - S3_SECRET_KEY
+    - S3_REGION: The AWS region (e.g., 'us-east-1')
+    - S3_ACCESS_KEY: Your AWS access key
+    - S3_SECRET_KEY: Your AWS secret key
 
     Returns:
-        boto3.client: Configured S3 client
+        boto3.client: A configured S3 client for interacting with AWS
     """
     try:
+        # Get required configuration from environment variables
         region = os.getenv("S3_REGION")
         access_key = os.getenv("S3_ACCESS_KEY")
         secret_key = os.getenv("S3_SECRET_KEY")
 
+        # Validate that all required variables are present
         if not all([region, access_key, secret_key]):
-            raise ValueError("Missing required S3 environment variables")
+            err = "Missing required S3 environment variables (S3_REGION, S3_ACCESS_KEY, S3_SECRET_KEY)"
+            logger.error(err)
+            raise ValueError(err)
 
+        # Create and return the S3 client
         return boto3.client(
             "s3",
             region_name=region,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
         )
+
     except Exception as e:
-        logger.error(f"Failed to create S3 client: {e}")
+        err = f"Failed to create S3 client: {e}"
+        logger.error(err)
         raise
 
 
-def list_s3_images(bucket, prefix=""):
+def parse_s3_uri(uri):
     """
-    List all image files in an S3 bucket under the given prefix.
+    Parse an S3 URI into bucket name and key.
+    This function is used by the API nodes to handle s3:// URIs.
 
     Args:
-        bucket (str): S3 bucket name
-        prefix (str): Path prefix to filter by
+        uri (str): An S3 URI in the format s3://bucket/path/to/file
 
     Returns:
-        list: List of image file paths
+        tuple: (bucket_name, key)
+
+    Raises:
+        ValueError: If the URI format is invalid
     """
-    try:
-        s3_client = get_s3_client()
-        paginator = s3_client.get_paginator("list_objects_v2")
-        image_extensions = (".png", ".jpg", ".jpeg", ".webp")
+    if not uri.startswith("s3://"):
+        raise ValueError("URI must start with 's3://'")
 
-        # Make sure prefix doesn't start with '/' and ends with '/'
-        prefix = prefix.strip("/")
-        if prefix:
-            prefix = prefix + "/"
+    # Remove the s3:// prefix
+    path = uri[5:]
 
-        image_files = []
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            if "Contents" not in page:
-                continue
+    # Split into bucket and key
+    parts = path.split("/", 1)
+    if len(parts) != 2:
+        raise ValueError("Invalid S3 URI format. Expected s3://bucket/key")
 
-            for obj in page["Contents"]:
-                key = obj["Key"]
-                if key.lower().endswith(image_extensions):
-                    image_files.append(key)
+    bucket = parts[0]
+    key = parts[1]
 
-        return sorted(image_files) if image_files else [""]
-    except Exception as e:
-        logger.error(f"Failed to list S3 images: {e}")
-        return [""]
+    if not bucket:
+        raise ValueError("No bucket specified in URI")
 
-
-def generate_s3_uri(bucket, key):
-    """
-    Generate a properly formatted S3 URI.
-
-    Args:
-        bucket (str): S3 bucket name
-        key (str): S3 object key
-
-    Returns:
-        str: Formatted S3 URI
-    """
-    return f"s3://{bucket}/{key}"
-
-
-def generate_unique_filename(original_filename):
-    """
-    Generate a unique filename using UUID while preserving the original extension.
-
-    Args:
-        original_filename (str): Original filename
-
-    Returns:
-        str: New filename with UUID
-    """
-    ext = os.path.splitext(original_filename)[1]
-    return f"{uuid.uuid4()}{ext}"
+    return bucket, key
