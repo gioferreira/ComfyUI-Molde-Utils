@@ -1,21 +1,39 @@
 import os
 import boto3
 from .logger import logger
+from dotenv import load_dotenv
+
+
+def load_environment_variables():
+    """
+    Load environment variables from .env files in multiple locations.
+    Checks both the custom node directory and the ComfyUI root directory.
+    """
+    # Get the current file's directory (custom node directory)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Get the ComfyUI root directory (two levels up from s3_nodes)
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+
+    # Try loading from custom node directory first
+    if os.path.exists(os.path.join(current_dir, ".env")):
+        load_dotenv(os.path.join(current_dir, ".env"))
+        logger.info("Loaded .env from custom node directory")
+
+    # Then try loading from ComfyUI root directory
+    if os.path.exists(os.path.join(root_dir, ".env")):
+        load_dotenv(os.path.join(root_dir, ".env"))
+        logger.info("Loaded .env from ComfyUI root directory")
 
 
 def get_s3_client():
     """
     Create an S3 client using environment variables.
-    This function provides the core S3 client that our nodes need.
-
-    Required environment variables:
-    - S3_REGION: The AWS region (e.g., 'us-east-1')
-    - S3_ACCESS_KEY: Your AWS access key
-    - S3_SECRET_KEY: Your AWS secret key
-
-    Returns:
-        boto3.client: A configured S3 client for interacting with AWS
+    Now with better environment variable loading and error handling.
     """
+    # Load environment variables from all possible locations
+    load_environment_variables()
+
     try:
         # Get required configuration from environment variables
         region = os.getenv("S3_REGION")
@@ -23,9 +41,24 @@ def get_s3_client():
         secret_key = os.getenv("S3_SECRET_KEY")
 
         # Validate that all required variables are present
-        if not all([region, access_key, secret_key]):
-            err = "Missing required S3 environment variables (S3_REGION, S3_ACCESS_KEY, S3_SECRET_KEY)"
+        missing_vars = []
+        if not region:
+            missing_vars.append("S3_REGION")
+        if not access_key:
+            missing_vars.append("S3_ACCESS_KEY")
+        if not secret_key:
+            missing_vars.append("S3_SECRET_KEY")
+
+        if missing_vars:
+            err = (
+                f"Missing required S3 environment variables: {', '.join(missing_vars)}"
+            )
             logger.error(err)
+            logger.error(
+                f"Please ensure these variables are set in your .env file at either:"
+            )
+            logger.error(f"- ComfyUI root directory")
+            logger.error(f"- Custom node directory")
             raise ValueError(err)
 
         # Create and return the S3 client
@@ -45,25 +78,14 @@ def get_s3_client():
 def parse_s3_uri(uri):
     """
     Parse an S3 URI into bucket name and key.
-    This function is used by the API nodes to handle s3:// URIs.
-
-    Args:
-        uri (str): An S3 URI in the format s3://bucket/path/to/file
-
-    Returns:
-        tuple: (bucket_name, key)
-
-    Raises:
-        ValueError: If the URI format is invalid
     """
     if not uri.startswith("s3://"):
         raise ValueError("URI must start with 's3://'")
 
-    # Remove the s3:// prefix
+    # Remove the s3:// prefix and split into bucket and key
     path = uri[5:]
-
-    # Split into bucket and key
     parts = path.split("/", 1)
+
     if len(parts) != 2:
         raise ValueError("Invalid S3 URI format. Expected s3://bucket/key")
 
