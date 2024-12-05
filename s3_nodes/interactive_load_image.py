@@ -2,81 +2,23 @@ import torch
 import numpy as np
 from PIL import Image, ImageOps, ImageSequence
 import os
-import time
-from typing import Dict, List, Tuple, Optional
 
 from .s3_utils import get_s3_client
 from .logger import logger
 
 
-class S3FileList:
-    """Helper class to manage S3 file listings with caching, similar to ComfyUI's pattern"""
-
-    _cache: Dict[str, Tuple[List[str], float]] = {}
-
-    @classmethod
-    def get_files(cls, bucket: str, prefix: str = "") -> List[str]:
-        """
-        Get list of files from S3 with caching, similar to ComfyUI's get_filename_list
-        """
-        cache_key = f"{bucket}:{prefix}"
-
-        # Check cache first
-        if cache_key in cls._cache:
-            cached_files, cached_time = cls._cache[cache_key]
-            # Cache for 5 seconds
-            if time.time() - cached_time < 5:
-                return cached_files
-
-        try:
-            s3_client = get_s3_client()
-            if not s3_client:
-                return ["none"]
-
-            response = s3_client.list_objects_v2(
-                Bucket=bucket, Prefix=prefix if prefix else ""
-            )
-
-            if "Contents" not in response:
-                return ["none"]
-
-            # Filter for image files
-            image_extensions = (".png", ".jpg", ".jpeg", ".webp")
-            files = [
-                obj["Key"].replace(prefix, "", 1) if prefix else obj["Key"]
-                for obj in response["Contents"]
-                if obj["Key"].lower().endswith(image_extensions)
-            ]
-
-            # Update cache
-            cls._cache[cache_key] = (sorted(files) if files else ["none"], time.time())
-            return sorted(files) if files else ["none"]
-
-        except Exception as e:
-            logger.error(f"Failed to list S3 files: {e}")
-            return ["none"]
-
-
 class LoadImageS3Interactive:
-    current_bucket: Optional[str] = None
-    current_prefix: Optional[str] = None
-
     @classmethod
     def INPUT_TYPES(s):
         """
-        Define inputs following ComfyUI's pattern for dynamic dropdowns
+        Define node inputs following ComfyUI's pattern exactly
         """
-        files = ["none"]
-
-        # If we have current bucket/prefix, try to get the file list
-        if s.current_bucket:
-            files = S3FileList.get_files(s.current_bucket, s.current_prefix or "")
-
         return {
             "required": {
-                "bucket": ("STRING", {"default": s.current_bucket or ""}),
-                "prefix": ("STRING", {"default": s.current_prefix or ""}),
-                "image": (files,),  # Simple tuple format like ComfyUI uses
+                "bucket": ("STRING", {"default": ""}),
+                "prefix": ("STRING", {"default": ""}),
+                # For dropdowns in ComfyUI, just provide the tuple of options
+                "image": ([""],),
             }
         }
 
@@ -84,25 +26,18 @@ class LoadImageS3Interactive:
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "load_image"
 
-    def load_image(self, bucket: str, prefix: str, image: str):
-        """Load and process the selected image from S3"""
+    def load_image(self, bucket, prefix, image):
         try:
-            # Update current values
-            self.__class__.current_bucket = bucket
-            self.__class__.current_prefix = prefix
-
-            if image == "none":
-                raise ValueError("No image selected")
+            if not bucket:
+                raise ValueError("Bucket name is required")
 
             s3_client = get_s3_client()
-            if not s3_client:
-                raise ValueError("S3 client not initialized")
 
             # Construct the full S3 path
             s3_path = os.path.join(prefix if prefix else "", image)
             local_path = os.path.join("input", image)
 
-            # Download the file
+            # Download and process the image
             s3_client.download_file(bucket, s3_path, local_path)
 
             try:
@@ -117,11 +52,13 @@ class LoadImageS3Interactive:
                     image = i.convert("RGB")
                     image = np.array(image).astype(np.float32) / 255.0
                     image = torch.from_numpy(image)[None,]
+
                     if "A" in i.getbands():
                         mask = np.array(i.getchannel("A")).astype(np.float32) / 255.0
                         mask = 1.0 - torch.from_numpy(mask)
                     else:
                         mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
+
                     output_images.append(image)
                     output_masks.append(mask.unsqueeze(0))
 
@@ -135,6 +72,7 @@ class LoadImageS3Interactive:
                 return (output_image, output_mask)
 
             finally:
+                # Clean up the local file
                 if os.path.exists(local_path):
                     os.remove(local_path)
 
@@ -143,9 +81,48 @@ class LoadImageS3Interactive:
             raise
 
     @classmethod
-    def IS_CHANGED(s, bucket: str, prefix: str, image: str) -> bool:
+    def update_images(s, bucket, prefix):
+        """Update available images for the given bucket/prefix"""
+        try:
+            if not bucket:
+                return [""]
+
+            s3_client = get_s3_client()
+            response = s3_client.list_objects_v2(
+                Bucket=bucket, Prefix=prefix if prefix else ""
+            )
+
+            if "Contents" not in response:
+                return [""]
+
+            image_extensions = (".png", ".jpg", ".jpeg", ".webp")
+            files = [
+                obj["Key"].replace(prefix, "", 1) if prefix else obj["Key"]
+                for obj in response["Contents"]
+                if obj["Key"].lower().endswith(image_extensions)
+            ]
+
+            return sorted(files) if files else [""]
+
+        except Exception as e:
+            logger.error(f"Failed to list files: {e}")
+            return [""]
+
+    @classmethod
+    def VALIDATE_INPUTS(s, bucket, prefix, image):
         """
-        Tell ComfyUI when to refresh the node.
-        Following ComfyUI's pattern of using simple change detection.
+        Validate the inputs and update the available images list.
         """
-        return bucket != s.current_bucket or prefix != s.current_prefix
+        try:
+            if not bucket:
+                return "Bucket name is required"
+
+            # Try to list files - this will validate the S3 credentials
+            files = s.update_images(bucket, prefix)
+            if not files or (len(files) == 1 and files[0] == ""):
+                return f"No images found in bucket '{bucket}' with prefix '{prefix}'"
+
+            return True
+
+        except Exception as e:
+            return str(e)
