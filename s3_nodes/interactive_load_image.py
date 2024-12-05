@@ -8,17 +8,46 @@ from .logger import logger
 
 
 class LoadImageS3Interactive:
+    # Class-level variables to track state
+    _current_bucket = ""
+    _current_prefix = ""
+    _current_files = [""]
+
     @classmethod
     def INPUT_TYPES(s):
         """
-        Define node inputs following ComfyUI's pattern exactly
+        Define inputs. If we have current bucket/prefix, show files from there.
         """
+        if s._current_bucket and s._current_prefix:
+            try:
+                s3_client = get_s3_client()
+                response = s3_client.list_objects_v2(
+                    Bucket=s._current_bucket,
+                    Prefix=s._current_prefix if s._current_prefix else "",
+                )
+
+                if "Contents" in response:
+                    image_extensions = (".png", ".jpg", ".jpeg", ".webp")
+                    s._current_files = [
+                        obj["Key"].replace(s._current_prefix, "", 1)
+                        if s._current_prefix
+                        else obj["Key"]
+                        for obj in response["Contents"]
+                        if obj["Key"].lower().endswith(image_extensions)
+                    ]
+                    if not s._current_files:
+                        s._current_files = [""]
+                else:
+                    s._current_files = [""]
+            except Exception as e:
+                logger.error(f"Failed to list S3 files: {e}")
+                s._current_files = [""]
+
         return {
             "required": {
-                "bucket": ("STRING", {"default": ""}),
-                "prefix": ("STRING", {"default": ""}),
-                # For dropdowns in ComfyUI, just provide the tuple of options
-                "image": ([""],),
+                "bucket": ("STRING", {"default": s._current_bucket}),
+                "prefix": ("STRING", {"default": s._current_prefix}),
+                "image": (sorted(s._current_files),),
             }
         }
 
@@ -27,17 +56,23 @@ class LoadImageS3Interactive:
     FUNCTION = "load_image"
 
     def load_image(self, bucket, prefix, image):
+        """Load and process the selected image from S3"""
         try:
+            # Update class state
+            self.__class__._current_bucket = bucket
+            self.__class__._current_prefix = prefix
+
             if not bucket:
                 raise ValueError("Bucket name is required")
 
-            s3_client = get_s3_client()
+            if image == "":
+                raise ValueError("No image selected")
 
-            # Construct the full S3 path
+            s3_client = get_s3_client()
             s3_path = os.path.join(prefix if prefix else "", image)
             local_path = os.path.join("input", image)
 
-            # Download and process the image
+            # Download the file
             s3_client.download_file(bucket, s3_path, local_path)
 
             try:
@@ -72,7 +107,6 @@ class LoadImageS3Interactive:
                 return (output_image, output_mask)
 
             finally:
-                # Clean up the local file
                 if os.path.exists(local_path):
                     os.remove(local_path)
 
@@ -81,46 +115,26 @@ class LoadImageS3Interactive:
             raise
 
     @classmethod
-    def update_images(s, bucket, prefix):
-        """Update available images for the given bucket/prefix"""
-        try:
-            if not bucket:
-                return [""]
-
-            s3_client = get_s3_client()
-            response = s3_client.list_objects_v2(
-                Bucket=bucket, Prefix=prefix if prefix else ""
-            )
-
-            if "Contents" not in response:
-                return [""]
-
-            image_extensions = (".png", ".jpg", ".jpeg", ".webp")
-            files = [
-                obj["Key"].replace(prefix, "", 1) if prefix else obj["Key"]
-                for obj in response["Contents"]
-                if obj["Key"].lower().endswith(image_extensions)
-            ]
-
-            return sorted(files) if files else [""]
-
-        except Exception as e:
-            logger.error(f"Failed to list files: {e}")
-            return [""]
+    def IS_CHANGED(s, bucket, prefix, image):
+        """
+        Tell ComfyUI to consider the node changed and force refresh when bucket/prefix change
+        """
+        changed = bucket != s._current_bucket or prefix != s._current_prefix
+        if changed:
+            # This will cause ComfyUI to call INPUT_TYPES again
+            s._current_bucket = bucket
+            s._current_prefix = prefix
+        return changed
 
     @classmethod
     def VALIDATE_INPUTS(s, bucket, prefix, image):
-        """
-        Validate the inputs and update the available images list.
-        """
+        """Validate the inputs"""
         try:
             if not bucket:
                 return "Bucket name is required"
 
-            # Try to list files - this will validate the S3 credentials
-            files = s.update_images(bucket, prefix)
-            if not files or (len(files) == 1 and files[0] == ""):
-                return f"No images found in bucket '{bucket}' with prefix '{prefix}'"
+            if image == "":
+                return "No image selected"
 
             return True
 
