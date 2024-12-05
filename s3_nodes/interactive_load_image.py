@@ -11,69 +11,47 @@ S3_CLIENT = get_s3_client()
 
 
 class LoadImageS3Interactive:
-    last_bucket = None
-    last_prefix = None
-    cached_files = []
-
     @classmethod
     def INPUT_TYPES(s):
-        """
-        Define inputs and attempt to populate the file list.
-        This method is called by ComfyUI to determine what inputs are available.
-        """
         # First, define the bucket and prefix inputs
-        inputs = {
+        bucket = ""  # Default empty bucket
+        prefix = ""  # Default empty prefix
+
+        try:
+            # Try to list files from S3 if bucket is provided
+            if bucket:
+                response = S3_CLIENT.list_objects_v2(
+                    Bucket=bucket, Prefix=prefix if prefix else ""
+                )
+
+                if "Contents" in response:
+                    # Filter for image files
+                    image_extensions = (".png", ".jpg", ".jpeg", ".webp")
+                    files = [
+                        obj["Key"]
+                        for obj in response["Contents"]
+                        if obj["Key"].lower().endswith(image_extensions)
+                    ]
+
+                    if prefix:
+                        files = [f.replace(prefix, "", 1) for f in files]
+                else:
+                    files = []
+            else:
+                files = []
+
+        except Exception as e:
+            logger.error(f"Failed to list files: {e}")
+            files = []
+
+        # Return the input configuration with all three inputs
+        return {
             "required": {
                 "bucket": ("STRING", {"default": ""}),
                 "prefix": ("STRING", {"default": ""}),
-                # Start with an empty list for the image dropdown
-                "image": ([""], {"default": ""}),
+                "image": (sorted(files), {"default": "", "image_upload": False}),
             }
         }
-
-        # If we have a bucket and prefix stored, try to get the file list
-        if s.last_bucket and s.last_prefix:
-            try:
-                s.cached_files = s._get_files(s.last_bucket, s.last_prefix)
-                inputs["required"]["image"] = (sorted(s.cached_files), {"default": ""})
-            except Exception as e:
-                logger.error(f"Failed to list files: {e}")
-
-        return inputs
-
-    @classmethod
-    def _get_files(cls, bucket, prefix):
-        """
-        Get list of files from S3, similar to the original implementation
-        """
-        try:
-            if not bucket:
-                return [""]
-
-            response = S3_CLIENT.list_objects_v2(
-                Bucket=bucket, Prefix=prefix if prefix else ""
-            )
-
-            if "Contents" not in response:
-                return [""]
-
-            # Filter for image files
-            image_extensions = (".png", ".jpg", ".jpeg", ".webp")
-            files = [
-                obj["Key"]
-                for obj in response["Contents"]
-                if obj["Key"].lower().endswith(image_extensions)
-            ]
-
-            # Remove prefix from filenames to match original behavior
-            if prefix:
-                files = [f.replace(prefix, "", 1) for f in files]
-
-            return files if files else [""]
-
-        except Exception as e:
-            logger.error(f"Error listing files: {e}")
-            return [""]
 
     CATEGORY = "image/input"
     RETURN_TYPES = ("IMAGE", "MASK")
@@ -85,10 +63,6 @@ class LoadImageS3Interactive:
         This follows the original implementation's pattern but uses our bucket/prefix.
         """
         try:
-            # Update our stored bucket/prefix for future refreshes
-            self.__class__.last_bucket = bucket
-            self.__class__.last_prefix = prefix
-
             # Construct the full S3 path
             s3_path = os.path.join(prefix if prefix else "", image)
 
@@ -138,6 +112,6 @@ class LoadImageS3Interactive:
     @classmethod
     def IS_CHANGED(s, bucket, prefix, image):
         """
-        Check if we need to refresh the dropdown.
+        Tell ComfyUI to always check for updates
         """
-        return bucket != s.last_bucket or prefix != s.last_prefix
+        return True
