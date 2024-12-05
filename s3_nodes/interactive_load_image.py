@@ -8,26 +8,21 @@ from .logger import logger
 
 
 class LoadImageS3Interactive:
-    # Class variables to track state
-    _current_bucket = ""
-    _current_prefix = ""
-    _current_images = [""]
-
     @classmethod
     def INPUT_TYPES(s):
         """
-        This method is called by ComfyUI whenever it needs to know what inputs the node accepts.
+        Called by ComfyUI when:
+        1. The node is first created
+        2. The graph is refreshed
+        3. getNodeDefs is called
         """
-        # First, define the inputs including our image dropdown
         return {
             "required": {
-                "bucket": ("STRING", {"default": s._current_bucket}),
-                "prefix": ("STRING", {"default": s._current_prefix}),
-                "image": (s._current_images,),  # Use our cached list of images
-                "refresh": (
-                    ["no", "yes"],
-                    {"default": "no"},
-                ),  # Keep refresh trigger for manual updates
+                "bucket": ("STRING", {"default": ""}),
+                "prefix": ("STRING", {"default": ""}),
+                # For the image dropdown, ComfyUI will use the first element of this tuple
+                # during refresh operations
+                "image": ([""],),
             }
         }
 
@@ -35,67 +30,52 @@ class LoadImageS3Interactive:
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "load_image"
 
-    @classmethod
-    def update_image_list(cls, bucket, prefix):
-        """
-        Update the list of available images for a given bucket and prefix.
-        Returns the list of images and updates the class state.
-        """
+    def get_images_for_bucket(self, bucket, prefix):
+        """Get list of images from S3"""
         try:
             if not bucket:
-                cls._current_images = [""]
-                return cls._current_images
+                return [""]
 
             s3_client = get_s3_client()
             response = s3_client.list_objects_v2(
                 Bucket=bucket, Prefix=prefix if prefix else ""
             )
 
+            if "Contents" not in response:
+                return [""]
+
+            # Filter for image files
             image_extensions = (".png", ".jpg", ".jpeg", ".webp")
-            files = []
-            if "Contents" in response:
-                files = [
-                    obj["Key"].replace(prefix, "", 1) if prefix else obj["Key"]
-                    for obj in response["Contents"]
-                    if obj["Key"].lower().endswith(image_extensions)
-                ]
+            files = [
+                obj["Key"].replace(prefix, "", 1) if prefix else obj["Key"]
+                for obj in response["Contents"]
+                if obj["Key"].lower().endswith(image_extensions)
+            ]
 
-            # Update our cached list
-            cls._current_images = sorted(files) if files else [""]
-            cls._current_bucket = bucket
-            cls._current_prefix = prefix
-
-            return cls._current_images
+            return sorted(files) if files else [""]
 
         except Exception as e:
             logger.error(f"Failed to list S3 files: {e}")
-            cls._current_images = [""]
-            return cls._current_images
+            return [""]
 
-    def load_image(self, bucket, prefix, image, refresh):
+    def load_image(self, bucket, prefix, image):
         """Load and process the selected image"""
         try:
             if not bucket:
                 raise ValueError("Bucket name is required")
 
-            # If either bucket or prefix changed, or refresh is requested,
-            # update our image list
-            if (
-                bucket != self._current_bucket
-                or prefix != self._current_prefix
-                or refresh == "yes"
-            ):
-                self.update_image_list(bucket, prefix)
+            if image == "":
+                # Get fresh list of images
+                images = self.get_images_for_bucket(bucket, prefix)
+                if not images or images[0] == "":
+                    raise ValueError(
+                        f"No images found in bucket '{bucket}' with prefix '{prefix}'"
+                    )
+                image = images[0]
 
-            if not image or image == "":
-                raise ValueError(
-                    f"No images found in bucket '{bucket}' with prefix '{prefix}'"
-                )
-
-            # Get S3 client and construct paths
             s3_client = get_s3_client()
             s3_path = os.path.join(prefix if prefix else "", image)
-            local_path = os.path.join("input", os.path.basename(image))
+            local_path = os.path.join("input", image)
 
             # Download and process the image
             s3_client.download_file(bucket, s3_path, local_path)
@@ -140,31 +120,11 @@ class LoadImageS3Interactive:
             raise
 
     @classmethod
-    def IS_CHANGED(s, bucket, prefix, image, refresh):
-        """Tell ComfyUI when to refresh the node"""
-        # Refresh when bucket or prefix changes, or when refresh is requested
-        changed = (
-            bucket != s._current_bucket
-            or prefix != s._current_prefix
-            or refresh == "yes"
-        )
-
-        if changed:
-            # Update our image list
-            s.update_image_list(bucket, prefix)
-        return changed
-
-    @classmethod
-    def VALIDATE_INPUTS(s, bucket, prefix, image, refresh):
+    def VALIDATE_INPUTS(s, bucket, prefix, image):
         """Validate the inputs"""
         try:
             if not bucket:
                 return "Bucket name is required"
-
-            if image == "":
-                return "No image selected"
-
             return True
-
         except Exception as e:
             return str(e)
