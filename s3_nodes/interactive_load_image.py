@@ -8,85 +8,55 @@ from .logger import logger
 
 
 class LoadImageS3Interactive:
-    # Static configuration for the node
-    s3_bucket = None
-    s3_prefix = None
-
-    @classmethod
-    def setup_s3_connection(cls, bucket, prefix=""):
-        """
-        Set up the S3 connection that will be used by this node.
-        This should be called before the node is used.
-        """
-        cls.s3_bucket = bucket
-        cls.s3_prefix = prefix
-        logger.info(f"S3 connection configured for bucket: {bucket}, prefix: {prefix}")
-
     @classmethod
     def INPUT_TYPES(s):
-        """
-        Get the available files from S3, similar to how LoadImage gets files from disk
-        """
-        try:
-            if not s.s3_bucket:
-                return {"required": {"image": (["Please configure S3 bucket first"],)}}
-
-            # Get S3 client
-            s3_client = get_s3_client()
-
-            # List objects in bucket/prefix
-            response = s3_client.list_objects_v2(
-                Bucket=s.s3_bucket, Prefix=s.s3_prefix if s.s3_prefix else ""
-            )
-
-            # Filter for image files
-            files = []
-            if "Contents" in response:
-                image_extensions = (".png", ".jpg", ".jpeg", ".webp")
-                files = [
-                    obj["Key"].replace(s.s3_prefix, "", 1)
-                    if s.s3_prefix
-                    else obj["Key"]
-                    for obj in response["Contents"]
-                    if obj["Key"].lower().endswith(image_extensions)
-                ]
-
-            if not files:
-                files = ["No images found"]
-
-            # Return the input configuration
-            return {"required": {"image": (sorted(files),)}}
-
-        except Exception as e:
-            logger.error(f"Error listing S3 files: {e}")
-            return {"required": {"image": (["Error listing S3 files"],)}}
+        return {
+            "required": {
+                "bucket": ("STRING", {"default": ""}),
+                "prefix": ("STRING", {"default": ""}),
+                "refresh": (["no", "yes"], {"default": "no"}),  # Add a refresh trigger
+            }
+        }
 
     CATEGORY = "image/input"
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "load_image"
 
-    def load_image(self, image):
-        """Load and process the selected image"""
+    def load_image(self, bucket, prefix, refresh):
+        """Load image from the specified bucket and prefix"""
         try:
-            if not self.s3_bucket:
-                raise ValueError("S3 bucket not configured")
+            if not bucket:
+                raise ValueError("Bucket name is required")
 
-            if image in [
-                "No images found",
-                "Error listing S3 files",
-                "Please configure S3 bucket first",
-            ]:
-                raise ValueError("No valid image selected")
-
-            # Get the S3 client
+            # Get S3 client
             s3_client = get_s3_client()
 
-            # Construct the full S3 path
-            s3_path = os.path.join(self.s3_prefix if self.s3_prefix else "", image)
-            local_path = os.path.join("input", image)
+            # List available images
+            response = s3_client.list_objects_v2(
+                Bucket=bucket, Prefix=prefix if prefix else ""
+            )
 
-            # Download the file
-            s3_client.download_file(self.s3_bucket, s3_path, local_path)
+            # Filter for images
+            image_extensions = (".png", ".jpg", ".jpeg", ".webp")
+            files = []
+            if "Contents" in response:
+                files = [
+                    obj["Key"]
+                    for obj in response["Contents"]
+                    if obj["Key"].lower().endswith(image_extensions)
+                ]
+
+            if not files:
+                raise ValueError(
+                    f"No images found in bucket '{bucket}' with prefix '{prefix}'"
+                )
+
+            # For this example, let's just take the first image
+            image_key = files[0]
+            local_path = os.path.join("input", os.path.basename(image_key))
+
+            # Download and process the image
+            s3_client.download_file(bucket, image_key, local_path)
 
             try:
                 img = Image.open(local_path)
@@ -128,11 +98,16 @@ class LoadImageS3Interactive:
             raise
 
     @classmethod
-    def update_s3_config(cls, bucket, prefix=""):
-        """
-        Update the S3 configuration. This should trigger a refresh.
-        """
-        if bucket != cls.s3_bucket or prefix != cls.s3_prefix:
-            cls.setup_s3_connection(bucket, prefix)
+    def VALIDATE_INPUTS(s, bucket, prefix, refresh):
+        try:
+            if not bucket:
+                return "Bucket name is required"
+
+            # Try listing files to validate the connection
+            s3_client = get_s3_client()
+            s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix if prefix else "")
+
             return True
-        return False
+
+        except Exception as e:
+            return str(e)
