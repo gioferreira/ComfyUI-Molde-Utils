@@ -78,6 +78,11 @@ def list_s3_images(bucket, prefix=""):
         paginator = s3_client.get_paginator("list_objects_v2")
         image_extensions = (".png", ".jpg", ".jpeg", ".webp")
 
+        # Make sure prefix doesn't start with '/' and ends with '/'
+        prefix = prefix.strip("/")
+        if prefix:
+            prefix = prefix + "/"
+
         image_files = []
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             if "Contents" not in page:
@@ -88,10 +93,10 @@ def list_s3_images(bucket, prefix=""):
                 if key.lower().endswith(image_extensions):
                     image_files.append(key)
 
-        return sorted(image_files)
+        return sorted(image_files) if image_files else [""]
     except Exception as e:
         logger.error(f"Failed to list S3 images: {e}")
-        return []
+        return [""]
 
 
 def generate_s3_uri(bucket, key):
