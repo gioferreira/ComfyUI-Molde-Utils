@@ -6,32 +6,38 @@ import os
 from .s3_utils import get_s3_client
 from .logger import logger
 
-# Global client for S3 operations
-S3_CLIENT = get_s3_client()
-
 
 class LoadImageS3Interactive:
     current_bucket = None
     current_prefix = None
+    s3_client = None
+
+    @classmethod
+    def get_s3_client(cls):
+        """
+        Get or create S3 client
+        """
+        if cls.s3_client is None:
+            cls.s3_client = get_s3_client()
+        return cls.s3_client
 
     @classmethod
     def get_image_list(cls, bucket, prefix):
         """
-        Get list of images from S3 bucket/prefix combination.
-        This is separated out to make the logic clearer.
+        Get list of images from S3 bucket/prefix combination
         """
         try:
             if not bucket:
                 return []
 
-            response = S3_CLIENT.list_objects_v2(
+            s3_client = cls.get_s3_client()
+            response = s3_client.list_objects_v2(
                 Bucket=bucket, Prefix=prefix if prefix else ""
             )
 
             if "Contents" not in response:
                 return []
 
-            # Filter for image files
             image_extensions = (".png", ".jpg", ".jpeg", ".webp")
             files = [
                 obj["Key"]
@@ -39,7 +45,6 @@ class LoadImageS3Interactive:
                 if obj["Key"].lower().endswith(image_extensions)
             ]
 
-            # Remove prefix from filenames if needed
             if prefix:
                 files = [f.replace(prefix, "", 1) for f in files]
 
@@ -51,11 +56,6 @@ class LoadImageS3Interactive:
 
     @classmethod
     def INPUT_TYPES(s):
-        """
-        Define the input types for the node.
-        This gets called by ComfyUI whenever the graph is refreshed.
-        """
-        # Store current values if we have them
         files = []
         if s.current_bucket:
             files = s.get_image_list(s.current_bucket, s.current_prefix or "")
@@ -73,20 +73,15 @@ class LoadImageS3Interactive:
     FUNCTION = "load_image"
 
     def load_image(self, bucket, prefix, image):
-        """
-        Load and process the selected image from S3.
-        """
         try:
-            # Update the class's stored bucket/prefix
             self.__class__.current_bucket = bucket
             self.__class__.current_prefix = prefix
 
-            # Construct the full S3 path
+            s3_client = self.get_s3_client()
             s3_path = os.path.join(prefix if prefix else "", image)
             local_path = os.path.join("input", image)
 
-            # Download and process the image
-            S3_CLIENT.download_file(bucket, s3_path, local_path)
+            s3_client.download_file(bucket, s3_path, local_path)
 
             try:
                 img = Image.open(local_path)
@@ -118,7 +113,6 @@ class LoadImageS3Interactive:
                 return (output_image, output_mask)
 
             finally:
-                # Clean up the temporary file
                 if os.path.exists(local_path):
                     os.remove(local_path)
 
@@ -128,7 +122,4 @@ class LoadImageS3Interactive:
 
     @classmethod
     def IS_CHANGED(s, bucket, prefix, image):
-        """
-        Tell ComfyUI when inputs have changed and need refresh
-        """
         return bucket != s.current_bucket or prefix != s.current_prefix

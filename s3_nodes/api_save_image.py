@@ -1,6 +1,6 @@
 import os
-import uuid
 import json
+import uuid
 import tempfile
 import numpy as np
 from PIL import Image
@@ -11,8 +11,19 @@ from .logger import logger
 
 
 class SaveImageS3API:
+    s3_client = None
+
     def __init__(self):
-        self.compress_level = 4  # Default compression level
+        self.compress_level = 4
+
+    @classmethod
+    def get_s3_client(cls):
+        """
+        Get or create the S3 client when needed, following the singleton pattern.
+        """
+        if cls.s3_client is None:
+            cls.s3_client = get_s3_client()
+        return cls.s3_client
 
     @classmethod
     def INPUT_TYPES(s):
@@ -40,7 +51,7 @@ class SaveImageS3API:
         Save images to S3 with UUID-based filenames.
         """
         try:
-            s3_client = get_s3_client()
+            s3_client = self.get_s3_client()
             s3_uris = []
             results = []
 
@@ -78,7 +89,7 @@ class SaveImageS3API:
                         # Upload to S3
                         s3_client.upload_file(temp_file.name, bucket, s3_key)
 
-                        # Generate the S3 URI directly (replacing the removed utility function)
+                        # Generate and store the S3 URI
                         s3_uri = f"s3://{bucket}/{s3_key}"
                         s3_uris.append(s3_uri)
 
@@ -101,20 +112,3 @@ class SaveImageS3API:
         except Exception as e:
             logger.error(f"Failed to save images to S3: {e}")
             raise
-
-    @classmethod
-    def VALIDATE_INPUTS(s, bucket, prefix, compression, **kwargs):
-        """
-        Validate the inputs.
-        """
-        try:
-            if not bucket:
-                return "Bucket name is required"
-
-            if compression < 0 or compression > 9:
-                return "Compression level must be between 0 and 9"
-
-            return True
-
-        except Exception as e:
-            return str(e)
