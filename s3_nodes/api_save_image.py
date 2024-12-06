@@ -1,7 +1,6 @@
 import os
 import json
 import uuid
-import base64
 import tempfile
 import numpy as np
 from PIL import Image
@@ -28,7 +27,6 @@ class SaveImageS3API:
                 ),
             },
             "optional": {
-                # Now accepts any string content
                 "custom_metadata": (
                     "STRING",
                     {
@@ -37,7 +35,6 @@ class SaveImageS3API:
                         "placeholder": "Custom metadata string or base64 content",
                     },
                 ),
-                # Switch to specify if the content is base64
                 "metadata_is_base64": (["yes", "no"], {"default": "no"}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
@@ -49,27 +46,6 @@ class SaveImageS3API:
     OUTPUT_NODE = True
     OUTPUT_IS_LIST = (True,)
     CATEGORY = "image/output"
-
-    def process_metadata(self, custom_metadata, is_base64):
-        """
-        Process metadata string, handling both regular strings and base64 content.
-        Returns tuple of (processed_content, is_binary)
-        """
-        if not custom_metadata:
-            return None, False
-
-        if is_base64 == "yes":
-            try:
-                # Try to decode base64 content
-                decoded = base64.b64decode(custom_metadata)
-                return decoded, True
-            except Exception as e:
-                logger.warning(
-                    f"Failed to decode base64 metadata, treating as string: {e}"
-                )
-                return custom_metadata, False
-
-        return custom_metadata, False
 
     def save_images(
         self,
@@ -83,41 +59,28 @@ class SaveImageS3API:
         prompt=None,
         extra_pnginfo=None,
     ):
-        """
-        Save images to S3 with flexible metadata support
-        """
+        """Save images to S3 with metadata support"""
         try:
             s3_client = get_s3_client()
             s3_uris = []
             results = []
 
-            # Process metadata based on type
+            # Create PngInfo for metadata
             metadata = PngInfo()
 
-            # Add workflow metadata if enabled
+            # Add custom metadata first (raw, without any processing)
+            if custom_metadata:
+                metadata.add_text("metadata", custom_metadata)
+                if metadata_is_base64 == "yes":
+                    metadata.add_text("metadata_is_base64", "yes")
+
+            # Add workflow metadata if enabled (after custom metadata)
             if include_workflow_metadata == "enabled":
                 if prompt is not None:
                     metadata.add_text("prompt", json.dumps(prompt))
                 if extra_pnginfo is not None:
                     for x in extra_pnginfo:
                         metadata.add_text(x, json.dumps(extra_pnginfo[x]))
-
-            # Add custom metadata if provided
-            if custom_metadata:
-                processed_metadata, is_binary = self.process_metadata(
-                    custom_metadata, metadata_is_base64
-                )
-                if processed_metadata is not None:
-                    if is_binary:
-                        # For binary data (like decoded base64), store as binary
-                        metadata.add_text("custom_metadata_binary", "true")
-                        metadata.add_text(
-                            "custom_metadata", processed_metadata.decode("latin-1")
-                        )
-                    else:
-                        # For regular strings, store directly
-                        metadata.add_text("custom_metadata_binary", "false")
-                        metadata.add_text("custom_metadata", processed_metadata)
 
             for image in images:
                 # Convert the image tensor to a PIL Image
