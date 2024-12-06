@@ -128,8 +128,9 @@ class SaveImageS3API:
                             {
                                 "filename": filename,
                                 "subfolder": prefix,
-                                "type": self.type,
+                                "type": "s3_output",
                                 "uri": s3_uri,
+                                "direct": True,
                             }
                         )
 
@@ -138,24 +139,28 @@ class SaveImageS3API:
                         if os.path.exists(temp_file.name):
                             os.unlink(temp_file.name)
 
-            # After all images are saved, write URIs to output file
-            txt_filename = f"{uuid.uuid4()}_s3_uris.txt"
-            txt_path = os.path.join(self.output_dir, txt_filename)
+            # # After all images are saved, write URIs to output file
+            # txt_filename = f"{uuid.uuid4()}_s3_uris.txt"
+            # txt_path = os.path.join(self.output_dir, txt_filename)
 
-            with open(txt_path, "w") as f:
-                json.dump(s3_uris, f)
+            # with open(txt_path, "w") as f:
+            #     json.dump(s3_uris, f)
 
-            # Add txt file to results
-            results.append(
-                {
-                    "filename": txt_filename,
-                    "subfolder": "",
-                    "type": "output",
-                    "uri_file": True,
-                }
-            )
+            # # Add txt file to results
+            # results.append(
+            #     {
+            #         "filename": txt_filename,
+            #         "subfolder": "",
+            #         "type": "output",
+            #         "uri_file": True,
+            #     }
+            # )
 
-            return {"ui": {"images": results}, "result": (s3_uris,)}
+            return {
+                "ui": {"images": results},
+                "workflow": {"output_type": "s3", "uris": s3_uris},
+                "result": (s3_uris,),
+            }
 
         except Exception as e:
             logger.error(f"Failed to save images to S3: {e}")
