@@ -7,7 +7,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from .s3_utils import get_s3_client
 from .logger import logger
-import folder_paths
+import folder_paths  # type: ignore
 
 
 class SaveImageS3API:
@@ -35,7 +35,7 @@ class SaveImageS3API:
                 ),
                 "include_workflow_metadata": (
                     ["enabled", "disabled"],
-                    {"default": "enabled"},
+                    {"default": "disabled"},
                 ),
             },
             "optional": {
@@ -47,7 +47,7 @@ class SaveImageS3API:
                         "placeholder": "Custom metadata string or base64 content",
                     },
                 ),
-                "metadata_is_base64": (["yes", "no"], {"default": "no"}),
+                "metadata_is_base64": (["yes", "no"], {"default": "yes"}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
@@ -155,12 +155,14 @@ class SaveImageS3API:
             #         "uri_file": True,
             #     }
             # )
-
-            return {
+            resposta = {
                 "ui": {"images": results},
                 "workflow": {"output_type": "s3", "uris": s3_uris},
                 "result": (s3_uris,),
             }
+            print(f"{resposta=}")
+
+            return resposta
 
         except Exception as e:
             logger.error(f"Failed to save images to S3: {e}")
