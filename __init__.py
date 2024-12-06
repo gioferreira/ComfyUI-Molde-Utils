@@ -4,7 +4,6 @@ from .hex_to_rgb import HexToRGB
 from .was_fork import Molde_Text_Concatenate, Molde_Load_Image_Batch
 
 # Import new S3 nodes
-from .s3_nodes.interactive_load_image import LoadImageS3Interactive
 from .s3_nodes.api_load_image import LoadImageS3API
 from .s3_nodes.api_save_image import SaveImageS3API
 
@@ -62,14 +61,12 @@ NODE_DISPLAY_NAME_MAPPINGS.update(
 # Add new S3 nodes to the mappings
 NODE_CLASS_MAPPINGS.update(
     {
-        "LoadImageS3Interactive": LoadImageS3Interactive,
         "LoadImageS3API": LoadImageS3API,
         "SaveImageS3API": SaveImageS3API,
     }
 )
 NODE_DISPLAY_NAME_MAPPINGS.update(
     {
-        "Load Image from S3 (Interactive)": "LoadImageS3Interactive",
         "Load Image from S3 (URI)": "LoadImageS3API",
         "Save Image to S3": "SaveImageS3API",
     }
