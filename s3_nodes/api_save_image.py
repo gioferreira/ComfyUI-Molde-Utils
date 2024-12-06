@@ -12,6 +12,7 @@ from .logger import logger
 class SaveImageS3API:
     def __init__(self):
         self.compress_level = 4
+        self.type = "output"  # This helps ComfyUI identify this as an output node
 
     @classmethod
     def INPUT_TYPES(s):
@@ -20,7 +21,16 @@ class SaveImageS3API:
                 "images": ("IMAGE",),
                 "bucket": ("STRING", {"default": ""}),
                 "prefix": ("STRING", {"default": ""}),
-                "compression": ("INT", {"default": 4, "min": 0, "max": 9, "step": 1}),
+                "compression": (
+                    "INT",
+                    {
+                        "default": 4,
+                        "min": 0,
+                        "max": 9,
+                        "step": 1,
+                        "tooltip": "0 = no compression (fast/large), 9 = max compression (slow/small)",
+                    },
+                ),
                 "include_workflow_metadata": (
                     ["enabled", "disabled"],
                     {"default": "enabled"},
@@ -108,12 +118,15 @@ class SaveImageS3API:
                         s3_uri = f"s3://{bucket}/{s3_key}"
                         s3_uris.append(s3_uri)
 
-                        # Add to results
+                        # Print URI to console
+                        print(f"Saved image to: {s3_uri}")
+
+                        # Add to results for UI
                         results.append(
                             {
                                 "filename": filename,
                                 "subfolder": prefix,
-                                "type": "s3_output",
+                                "type": self.type,
                                 "uri": s3_uri,
                             }
                         )
@@ -123,6 +136,8 @@ class SaveImageS3API:
                         if os.path.exists(temp_file.name):
                             os.unlink(temp_file.name)
 
+            # Return both the UI info and the result tuple
+            # The empty results list makes the output optional
             return {"ui": {"images": results}, "result": (s3_uris,)}
 
         except Exception as e:
