@@ -7,12 +7,14 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from .s3_utils import get_s3_client
 from .logger import logger
+import folder_paths
 
 
 class SaveImageS3API:
     def __init__(self):
         self.compress_level = 4
         self.type = "output"  # This helps ComfyUI identify this as an output node
+        self.output_dir = folder_paths.get_output_directory()
 
     @classmethod
     def INPUT_TYPES(s):
@@ -136,8 +138,23 @@ class SaveImageS3API:
                         if os.path.exists(temp_file.name):
                             os.unlink(temp_file.name)
 
-            # Return both the UI info and the result tuple
-            # The empty results list makes the output optional
+            # After all images are saved, write URIs to output file
+            txt_filename = f"{uuid.uuid4()}_s3_uris.txt"
+            txt_path = os.path.join(self.output_dir, txt_filename)
+
+            with open(txt_path, "w") as f:
+                json.dump(s3_uris, f)
+
+            # Add txt file to results
+            results.append(
+                {
+                    "filename": txt_filename,
+                    "subfolder": "",
+                    "type": "output",
+                    "uri_file": True,
+                }
+            )
+
             return {"ui": {"images": results}, "result": (s3_uris,)}
 
         except Exception as e:
