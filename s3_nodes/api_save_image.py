@@ -10,6 +10,11 @@ from .logger import logger
 import folder_paths  # type: ignore
 
 
+def s3_path_join(*args):
+    # Filter out empty strings and join with forward slash
+    return "/".join(arg.strip("/") for arg in args if arg)
+
+
 class SaveImageS3API:
     def __init__(self):
         self.compress_level = 4
@@ -101,7 +106,8 @@ class SaveImageS3API:
 
                 # Generate a unique filename
                 filename = f"{uuid.uuid4()}.png"
-                s3_key = os.path.join(prefix, filename) if prefix else filename
+                s3_key = s3_path_join(prefix, filename) if prefix else filename
+                # s3_key = os.path.join(prefix, filename) if prefix else filename
 
                 temp_file = None
                 temp_filename = None
