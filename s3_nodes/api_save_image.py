@@ -103,41 +103,57 @@ class SaveImageS3API:
                 filename = f"{uuid.uuid4()}.png"
                 s3_key = os.path.join(prefix, filename) if prefix else filename
 
-                # Save to temporary file
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".png"
-                ) as temp_file:
-                    try:
-                        # Save with metadata and compression
-                        img.save(
-                            temp_file.name, pnginfo=metadata, compress_level=compression
-                        )
+                temp_file = None
+                temp_filename = None
 
-                        # Upload to S3
-                        s3_client.upload_file(temp_file.name, bucket, s3_key)
+                try:
+                    # Create and immediately close the temporary file to get its name
+                    temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    temp_filename = temp_file.name
+                    temp_file.close()
 
-                        # Generate S3 URI
-                        s3_uri = f"s3://{bucket}/{s3_key}"
-                        s3_uris.append(s3_uri)
+                    # Save with metadata and compression
+                    img.save(
+                        temp_filename,
+                        format="PNG",
+                        pnginfo=metadata,
+                        compress_level=compression,
+                    )
 
-                        # Print URI to console
-                        print(f"Saved image to: {s3_uri}")
+                    # Upload to S3
+                    s3_client.upload_file(temp_filename, bucket, s3_key)
 
-                        # Add to results for UI
-                        results.append(
-                            {
-                                "filename": filename,
-                                "subfolder": prefix,
-                                "type": "s3_output",
-                                "uri": s3_uri,
-                                "direct": True,
-                            }
-                        )
+                    # Generate S3 URI
+                    s3_uri = f"s3://{bucket}/{s3_key}"
+                    s3_uris.append(s3_uri)
 
-                    finally:
-                        # Cleanup
-                        if os.path.exists(temp_file.name):
-                            os.unlink(temp_file.name)
+                    # Print URI to console
+                    print(f"Saved image to: {s3_uri}")
+
+                    # Add to results for UI
+                    results.append(
+                        {
+                            "filename": filename,
+                            "subfolder": prefix,
+                            "type": "s3_output",
+                            "uri": s3_uri,
+                            "direct": True,
+                        }
+                    )
+
+                finally:
+                    # Clean up resources
+                    if img:
+                        img.close()
+
+                    # Try to delete the temporary file
+                    if temp_filename and os.path.exists(temp_filename):
+                        try:
+                            os.unlink(temp_filename)
+                        except (OSError, PermissionError) as e:
+                            logger.warning(
+                                f"Failed to delete temporary file {temp_filename}: {e}"
+                            )
 
             # # After all images are saved, write URIs to output file
             # txt_filename = f"{uuid.uuid4()}_s3_uris.txt"
@@ -155,6 +171,7 @@ class SaveImageS3API:
             #         "uri_file": True,
             #     }
             # )
+
             resposta = {
                 "ui": {"images": results},
                 "workflow": {"output_type": "s3", "uris": s3_uris},
