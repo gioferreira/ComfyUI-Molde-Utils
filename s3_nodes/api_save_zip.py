@@ -25,7 +25,6 @@ class SaveZipS3API:
                 "bucket": ("STRING", {"default": ""}),
                 "prefix": ("STRING", {"default": ""}),
                 "use_uuid": (["yes", "no"], {"default": "yes"}),
-                "archive_name": ("STRING", {"default": "images.zip"}),
                 "image_format": (["png", "jpeg", "webp"], {"default": "png"}),
                 "compression": (
                     "INT",
@@ -43,6 +42,10 @@ class SaveZipS3API:
                 ),
             },
             "optional": {
+                "archive_name": (
+                    "STRING",
+                    {"default": "images.zip", "show_if": {"use_uuid": "no"}},
+                ),
                 "custom_metadata": (
                     "STRING",
                     {
@@ -68,10 +71,10 @@ class SaveZipS3API:
         bucket,
         prefix,
         use_uuid="yes",
-        archive_name="images.zip",
         image_format="png",
         compression=4,
         include_workflow_metadata="enabled",
+        archive_name="images.zip",
         custom_metadata="",
         metadata_is_base64="no",
         prompt=None,
@@ -153,15 +156,7 @@ class SaveZipS3API:
                 # Handle archive name (use UUID if specified)
                 if use_uuid == "yes":
                     # Generate a UUID for the archive name
-                    # Extract extension from the provided archive_name or default to .zip
-                    file_ext = ".zip"
-                    if "." in archive_name:
-                        file_ext = "." + archive_name.split(".")[-1]
-                        if not file_ext.lower() == ".zip":
-                            file_ext = ".zip"  # Ensure zip extension
-
-                    # Generate the final archive name with UUID
-                    final_archive_name = f"{uuid.uuid4()}{file_ext}"
+                    final_archive_name = f"{uuid.uuid4()}.zip"
                 else:
                     # Use the provided archive name
                     final_archive_name = archive_name

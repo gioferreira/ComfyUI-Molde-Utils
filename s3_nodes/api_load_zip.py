@@ -1,11 +1,10 @@
 import torch
 import numpy as np
-from PIL import Image, ImageOps  # , ImageSequence
+from PIL import Image, ImageOps, ImageSequence
 import tempfile
 import os
 import zipfile
-
-# import io
+import io
 from .s3_utils import get_s3_client, parse_s3_uri
 from .logger import logger
 
