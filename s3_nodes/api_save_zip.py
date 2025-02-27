@@ -1,7 +1,6 @@
 import os
 import json
-
-# import uuid
+import uuid
 import tempfile
 import zipfile
 import numpy as np
@@ -25,6 +24,7 @@ class SaveZipS3API:
                 "images": ("IMAGE",),
                 "bucket": ("STRING", {"default": ""}),
                 "prefix": ("STRING", {"default": ""}),
+                "use_uuid": (["yes", "no"], {"default": "yes"}),
                 "archive_name": ("STRING", {"default": "images.zip"}),
                 "image_format": (["png", "jpeg", "webp"], {"default": "png"}),
                 "compression": (
@@ -67,7 +67,8 @@ class SaveZipS3API:
         images,
         bucket,
         prefix,
-        archive_name,
+        use_uuid="yes",
+        archive_name="images.zip",
         image_format="png",
         compression=4,
         include_workflow_metadata="enabled",
@@ -149,12 +150,31 @@ class SaveZipS3API:
                             arcname = os.path.relpath(file_path, temp_dir)
                             zipf.write(file_path, arcname)
 
-                # Ensure archive_name ends with .zip
-                if not archive_name.lower().endswith(".zip"):
-                    archive_name += ".zip"
+                # Handle archive name (use UUID if specified)
+                if use_uuid == "yes":
+                    # Generate a UUID for the archive name
+                    # Extract extension from the provided archive_name or default to .zip
+                    file_ext = ".zip"
+                    if "." in archive_name:
+                        file_ext = "." + archive_name.split(".")[-1]
+                        if not file_ext.lower() == ".zip":
+                            file_ext = ".zip"  # Ensure zip extension
+
+                    # Generate the final archive name with UUID
+                    final_archive_name = f"{uuid.uuid4()}{file_ext}"
+                else:
+                    # Use the provided archive name
+                    final_archive_name = archive_name
+                    # Ensure it has .zip extension
+                    if not final_archive_name.lower().endswith(".zip"):
+                        final_archive_name += ".zip"
 
                 # Create the S3 key
-                s3_key = s3_path_join(prefix, archive_name) if prefix else archive_name
+                s3_key = (
+                    s3_path_join(prefix, final_archive_name)
+                    if prefix
+                    else final_archive_name
+                )
 
                 # Upload to S3
                 s3_client.upload_file(temp_zip.name, bucket, s3_key)
@@ -169,7 +189,7 @@ class SaveZipS3API:
                     "ui": {
                         "zip": [
                             {
-                                "filename": archive_name,
+                                "filename": final_archive_name,
                                 "type": "s3_output",
                                 "uri": s3_uri,
                             }
