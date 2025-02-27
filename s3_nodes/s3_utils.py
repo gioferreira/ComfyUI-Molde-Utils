@@ -57,3 +57,47 @@ def parse_s3_uri(uri):
         raise ValueError("No bucket specified in URI")
 
     return bucket, key
+
+
+def s3_path_join(*args):
+    """
+    Join path components for S3 keys with forward slashes, ignoring empty components.
+
+    Args:
+        *args: Path components to join.
+
+    Returns:
+        str: Joined path using forward slashes (S3 standard).
+    """
+    # Filter out empty strings and join with forward slash
+    return "/".join(arg.strip("/") for arg in args if arg)
+
+
+def is_zip_file(s3_client, bucket, key):
+    """
+    Check if an S3 object is a zip file by examining its content type or by checking the file extension.
+
+    Args:
+        s3_client: Boto3 S3 client instance
+        bucket (str): S3 bucket name
+        key (str): S3 object key
+
+    Returns:
+        bool: True if the object is likely a zip file, False otherwise
+    """
+    try:
+        # Check by file extension first (faster)
+        if key.lower().endswith(".zip"):
+            return True
+
+        # If extension check is inconclusive, check content type
+        head_response = s3_client.head_object(Bucket=bucket, Key=key)
+        content_type = head_response.get("ContentType", "")
+
+        return content_type.lower() in [
+            "application/zip",
+            "application/x-zip-compressed",
+        ]
+    except Exception as e:
+        logger.error(f"Error checking if object is a zip file: {e}")
+        return False
